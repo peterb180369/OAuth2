@@ -118,14 +118,14 @@ public class OAuth2WebViewController: NSViewController, WKNavigationDelegate, NS
 	
 	/// This configuration is used for embedded WKWebViews
 	
-	public static var webViewConfiguration = WKWebViewConfiguration()
+	public static var webViewConfiguration:()->WKWebViewConfiguration = { WKWebViewConfiguration() }
 	
 	/** Override to fully load the view; adds a `WKWebView`, optionally a dismiss button, and shows the loading indicator. */
 	override public func loadView() {
 		view = NSView(frame: NSMakeRect(0, 0, Self.webViewWindowWidth, Self.webViewWindowHeight))
 		view.translatesAutoresizingMaskIntoConstraints = false
 		
-		let web = WKWebView(frame: view.bounds, configuration:Self.webViewConfiguration)
+		let web = WKWebView(frame: view.bounds, configuration:Self.webViewConfiguration())
 		web.translatesAutoresizingMaskIntoConstraints = false
 		web.navigationDelegate = self
 		web.alphaValue = 0.0
