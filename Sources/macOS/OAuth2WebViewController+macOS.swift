@@ -111,25 +111,21 @@ public class OAuth2WebViewController: NSViewController, WKNavigationDelegate, NS
 	// MARK: - View Handling
 	
 	/// Default web view window width; defaults to 600.
-	internal static let webViewWindowWidth = CGFloat(680.0)
+	public static var webViewWindowWidth = CGFloat(600)
 	
 	/// Default web view window height; defaults to 500.
-	internal static let webViewWindowHeight = CGFloat(800.0)
+	public static var webViewWindowHeight = CGFloat(500)
+	
+	/// This configuration is used for embedded WKWebViews
+	
+	public static var webViewConfiguration = WKWebViewConfiguration()
 	
 	/** Override to fully load the view; adds a `WKWebView`, optionally a dismiss button, and shows the loading indicator. */
 	override public func loadView() {
-		view = NSView(frame: NSMakeRect(0, 0, OAuth2WebViewController.webViewWindowWidth, OAuth2WebViewController.webViewWindowHeight))
+		view = NSView(frame: NSMakeRect(0, 0, Self.webViewWindowWidth, Self.webViewWindowHeight))
 		view.translatesAutoresizingMaskIntoConstraints = false
 		
-		// PB 25.05.22: To solve several UX issues for the Adobe login process we use a private browsing mode
-		// (i.e. non persistent cookies). Without a private browsing mode we would not be able to logout and
-		// login again with a different account. For implementation details, see the answer by Zack Shapiro
-		// at this thread: https://stackoverflow.com/questions/31289838/how-to-delete-wkwebview-cookies
-
-		let config = WKWebViewConfiguration()
-		config.websiteDataStore = WKWebsiteDataStore.nonPersistent()
-
-		let web = WKWebView(frame: view.bounds, configuration:config)
+		let web = WKWebView(frame: view.bounds, configuration:Self.webViewConfiguration)
 		web.translatesAutoresizingMaskIntoConstraints = false
 		web.navigationDelegate = self
 		web.alphaValue = 0.0
