@@ -20,6 +20,7 @@
 #if os(macOS)
 
 import Cocoa
+import AuthenticationServices
 #if !NO_MODULE_IMPORT
 import Base
 #endif
@@ -38,6 +39,12 @@ open class OAuth2Authorizer: OAuth2AuthorizerUI {
 	
 	/// Stores the default `NSWindowController` created to contain the web view controller.
 	var windowController: NSWindowController?
+	
+	/// Used to store the authentication session.
+	private var authenticationSession: AnyObject?
+	
+	/// Used to store the ASWebAuthenticationPresentationContextProvider
+	private var webAuthenticationPresentationContextProvider: AnyObject?
 	
 	
 	/**
@@ -77,9 +84,19 @@ open class OAuth2Authorizer: OAuth2AuthorizerUI {
 		guard #available(macOS 10.10, *) else {
 			throw OAuth2Error.generic("Embedded authorizing is only available in OS X 10.10 and later")
 		}
+
+		// present with ASWebAuthenticationSession
 		
+		if #available(macOS 10.15, *), config.ui.useAuthenticationSession {
+			guard let redirect = oauth2.redirect else {
+				throw OAuth2Error.noRedirectURL
+			}
+			
+			self.authenticationSessionEmbedded(at: url, withRedirect: redirect, prefersEphemeralWebBrowserSession: config.ui.prefersEphemeralWebBrowserSession)
+		}
+
 		// present as sheet
-		if let window = config.authorizeContext as? NSWindow {
+		else if let window = config.authorizeContext as? NSWindow {
 			let sheet = try authorizeEmbedded(from: window, at: url)
 			if config.authorizeEmbeddedAutoDismiss {
 				oauth2.internalAfterAuthorizeOrFail = { wasFailure, error in
@@ -101,6 +118,71 @@ open class OAuth2Authorizer: OAuth2AuthorizerUI {
 	}
 	
 	
+	// MARK: - SFAuthenticationSession / ASWebAuthenticationSession
+	
+	/**
+	Use ASWebAuthenticationSession to manage authorisation.
+	
+	The mechanism works just like when you're using Safari itself to log the user in, hence you **need to implement**
+	the AppleEvent handler for URLs in your application delegate.
+	
+	This method dismisses the view controller automatically - this cannot be disabled.
+	
+	- parameter at:       The authorize URL to open
+	- parameter redirect: The full redirect URL to use
+	- parameter prefersEphemeralWebBrowserSession: may be passed through to [ASWebAuthenticationSession](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession/3237231-prefersephemeralwebbrowsersessio).
+	- returns:            A Boolean value indicating whether the web authentication session starts successfully.
+	*/
+	@available(macOS 10.15, *)
+	@discardableResult
+	public func authenticationSessionEmbedded(at url: URL, withRedirect redirect: String, prefersEphemeralWebBrowserSession: Bool = false) -> Bool {
+		guard let redirectURL = URL(string: redirect) else {
+			oauth2.logger?.warn("OAuth2", msg: "Unable to parse redirect URL ”(redirect)“")
+			return false
+		}
+		
+		let completionHandler: (URL?, Error?) -> Void = { url, error in
+			if let url = Self.adjustRedirectURL(url) {
+				do {
+					try self.oauth2.handleRedirectURL(url as URL)
+				}
+				catch let err {
+					self.oauth2.logger?.warn("OAuth2", msg: "Cannot intercept redirect URL: \(err)")
+				}
+			} else {
+				if let authenticationSessionError = error as? ASWebAuthenticationSessionError {
+					switch authenticationSessionError.code {
+					case .canceledLogin:
+						self.oauth2.didFail(with: .requestCancelled)
+					default:
+						self.oauth2.didFail(with: error?.asOAuth2Error)
+					}
+				}
+				else {
+					self.oauth2.didFail(with: error?.asOAuth2Error)
+				}
+			}
+			self.authenticationSession = nil
+			self.webAuthenticationPresentationContextProvider = nil
+			
+			DispatchQueue.main.asyncAfter(deadline:.now()+3) {
+				NSApp.activate(ignoringOtherApps:true)
+			}
+		}
+		
+		self.authenticationSession = ASWebAuthenticationSession(url: url, callbackURLScheme: redirectURL.scheme, completionHandler: completionHandler)
+		self.webAuthenticationPresentationContextProvider = OAuth2ASWebAuthenticationPresentationContextProvider(authorizer: self)
+			
+		if let session = authenticationSession as? ASWebAuthenticationSession {
+			session.presentationContextProvider = webAuthenticationPresentationContextProvider as! OAuth2ASWebAuthenticationPresentationContextProvider
+			session.prefersEphemeralWebBrowserSession = prefersEphemeralWebBrowserSession
+		}
+
+		return (authenticationSession as! ASWebAuthenticationSession).start()
+	}
+	
+	public static var adjustRedirectURL:(URL?)->URL? = { $0 }
+
 	// MARK: - Window Creation
 	
 	/**
@@ -193,6 +275,31 @@ open class OAuth2Authorizer: OAuth2AuthorizerUI {
 		windowController.contentViewController = controller
 		
 		return windowController
+	}
+}
+
+
+	// MARK: - OAuth2ASWebAuthenticationPresentationContextProvider
+	
+@available(macOS 10.15, *)
+class OAuth2ASWebAuthenticationPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
+	
+	private let authorizer: OAuth2Authorizer
+	
+	init(authorizer: OAuth2Authorizer) {
+		self.authorizer = authorizer
+	}
+	
+	public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+		if let window = authorizer.oauth2.authConfig.authorizeContext as? NSWindow {
+			return window
+		}
+		
+		if let windowController = authorizer.oauth2.authConfig.authorizeContext as? NSWindowController, let window = windowController.window {
+			return window
+		}
+		
+		fatalError("Invalid authConfig.authorizeContext, must be an ASPresentationAnchor but is \(String(describing: authorizer.oauth2.authConfig.authorizeContext))")
 	}
 }
 
