@@ -267,6 +267,8 @@ open class OAuth2Authorizer: OAuth2AuthorizerUI {
 		window.titlebarAppearsTransparent = true
 		window.titleVisibility = .hidden
 		window.animationBehavior = .alertPanel
+		window.level = .modalPanel
+		
 		if let title = config.ui.title {
 			window.title = title
 		}
